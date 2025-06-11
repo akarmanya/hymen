@@ -1,4 +1,37 @@
-from typing import Literal
+from enum import Enum
+from typing import List, Optional
+from pydantic import BaseModel
 
-SpiderDomain = Literal["finos"]
-"""All the domains that are supported by the scraping pipeline. For each domain, there should be a spider module in the spiders directory."""
+
+class SpiderDomain(str, Enum):
+    FINOS = "finos"
+
+
+class RiskItem(BaseModel):
+    risk_id: str
+    title: str
+    summary: str
+    url: str
+
+
+class RiskSection(BaseModel):
+    category: str
+    risks: List[RiskItem]
+
+
+class MitigationItem(BaseModel):
+    mitigation_id: str
+    title: str
+    purpose: str
+    url: str
+
+
+class MitigationSection(BaseModel):
+    category: str
+    mitigations: List[MitigationItem]
+
+
+class FINOSCatalogue(BaseModel):
+    domain: SpiderDomain = SpiderDomain.FINOS
+    risk_sections: List[RiskSection]
+    mitigation_sections: List[MitigationSection]

@@ -1,37 +1,25 @@
 import re
-from typing import override
+from typing import List, Generator, Any
+from urllib.parse import urljoin
 
-import bleach
 import ftfy
 import structlog
-from lxml import etree, html
-from pydantic import BaseModel, computed_field
 
 import scrapy
 from scrapy import Request
-from scrapy.http import TextResponse
 
-from .schema import SpiderDomain
-
-
-class FINOSItem(BaseModel):
-    domain: SpiderDomain = "finos"
-    title: str
-    url: str
-    lyrics: str
-    metadata: dict
-    citations: list[str]
-
-    @computed_field
-    @property
-    @override
-    def identifier(self) -> str:
-        return str(self.url)
+from .schema import (
+    FINOSCatalogue,
+    RiskItem,
+    RiskSection,
+    MitigationItem,
+    MitigationSection,
+)
 
 
 class FINOSSpider(scrapy.Spider):
     name = "finos"
-    base_url = "https://air-governance-framework.finos.org/risks/ri-4_hallucination-and-inaccurate-outputs.html"
+    base_url = "https://air-governance-framework.finos.org/"
     logger = structlog.get_logger(__name__).bind(class_name="FINOSSpider")
 
     def clean_text(self, text):
@@ -53,6 +41,83 @@ class FINOSSpider(scrapy.Spider):
     def start_requests(self):
         yield Request(url=self.base_url, callback=self.parse)
 
-    def parse(self, response):
-        self.logger.info("response", response=response.text)
-        pass
+    def parse_risk_item(self, card_element) -> RiskItem:
+        risk_id = self.clean_text(
+            card_element.xpath(".//div[contains(@class, 'risk-id')]/text()").get("")
+        )
+        title = self.clean_text(
+            card_element.xpath(".//h3[contains(@class, 'card-title')]/text()").get("")
+        )
+        summary = self.clean_text(
+            card_element.xpath(".//p[contains(@class, 'card-text')]/text()").get("")
+        )
+        url = urljoin(self.base_url, card_element.xpath(".//a/@href").get(""))
+
+        return RiskItem(risk_id=risk_id, title=title, summary=summary, url=url)
+
+    def parse_mitigation_item(self, card_element) -> MitigationItem:
+        mitigation_id = self.clean_text(
+            card_element.xpath(".//div[contains(@class, 'mitigation-id')]/text()").get(
+                ""
+            )
+        )
+        title = self.clean_text(
+            card_element.xpath(".//h3[contains(@class, 'card-title')]/text()").get("")
+        )
+        purpose = self.clean_text(
+            card_element.xpath(".//p[contains(@class, 'card-text')]/text()").get("")
+        )
+        url = urljoin(self.base_url, card_element.xpath(".//a/@href").get(""))
+
+        return MitigationItem(
+            mitigation_id=mitigation_id, title=title, purpose=purpose, url=url
+        )
+
+    def parse(self, response) -> Generator[FINOSCatalogue, Any, None]:
+        # Parse risk sections
+        risk_sections: List[RiskSection] = []
+        risk_catalogue = response.xpath(
+            "//h2[@id='risk-catalogue']/following-sibling::section"
+        )
+        for section in risk_catalogue:
+            if section.xpath("following-sibling::h2[@id='mitigation-catalogue']"):
+                break
+
+            category = self.clean_text(
+                section.xpath(".//h3[contains(@class, 'category-title')]/text()").get(
+                    ""
+                )
+            )
+            risks = []
+            for card in section.xpath(".//div[contains(@class, 'card')]"):
+                risk = self.parse_risk_item(card)
+                risks.append(risk)
+
+            risk_sections.append(RiskSection(category=category, risks=risks))
+
+        # Parse mitigation sections
+        mitigation_sections: List[MitigationSection] = []
+        mitigation_catalogue = response.xpath(
+            "//h2[@id='mitigation-catalogue']/following-sibling::section"
+        )
+        for section in mitigation_catalogue:
+            category = self.clean_text(
+                section.xpath(".//h3[contains(@class, 'category-title')]/text()").get(
+                    ""
+                )
+            )
+            mitigations = []
+            for card in section.xpath(".//div[contains(@class, 'card')]"):
+                mitigation = self.parse_mitigation_item(card)
+                mitigations.append(mitigation)
+
+            mitigation_sections.append(
+                MitigationSection(category=category, mitigations=mitigations)
+            )
+
+        # Create the final catalogue
+        catalogue = FINOSCatalogue(
+            risk_sections=risk_sections, mitigation_sections=mitigation_sections
+        )
+
+        yield catalogue
