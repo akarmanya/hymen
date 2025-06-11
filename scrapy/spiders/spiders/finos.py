@@ -76,13 +76,13 @@ class FINOSSpider(scrapy.Spider):
     def parse(self, response) -> Generator[FINOSCatalogue, Any, None]:
         # Parse risk sections
         risk_sections: List[RiskSection] = []
-        risk_catalogue = response.xpath(
-            "//h2[@id='risk-catalogue']/following-sibling::section"
-        )
-        for section in risk_catalogue:
-            if section.xpath("following-sibling::h2[@id='mitigation-catalogue']"):
-                break
 
+        # Get all sections between risk catalogue and mitigation catalogue
+        risk_sections_html = response.xpath(
+            "//h2[@id='risk-catalogue']/following-sibling::section[count(preceding-sibling::h2[@id='mitigation-catalogue'])=0]"
+        )
+
+        for section in risk_sections_html:
             category = self.clean_text(
                 section.xpath(".//h3[contains(@class, 'category-title')]/text()").get(
                     ""
@@ -91,16 +91,19 @@ class FINOSSpider(scrapy.Spider):
             risks = []
             for card in section.xpath(".//div[contains(@class, 'card')]"):
                 risk = self.parse_risk_item(card)
-                risks.append(risk)
+                if risk.risk_id:
+                    risks.append(risk)
 
-            risk_sections.append(RiskSection(category=category, risks=risks))
+            if category and risks:
+                risk_sections.append(RiskSection(category=category, risks=risks))
 
         # Parse mitigation sections
         mitigation_sections: List[MitigationSection] = []
-        mitigation_catalogue = response.xpath(
+        mitigation_sections_html = response.xpath(
             "//h2[@id='mitigation-catalogue']/following-sibling::section"
         )
-        for section in mitigation_catalogue:
+
+        for section in mitigation_sections_html:
             category = self.clean_text(
                 section.xpath(".//h3[contains(@class, 'category-title')]/text()").get(
                     ""
@@ -109,11 +112,13 @@ class FINOSSpider(scrapy.Spider):
             mitigations = []
             for card in section.xpath(".//div[contains(@class, 'card')]"):
                 mitigation = self.parse_mitigation_item(card)
-                mitigations.append(mitigation)
+                if mitigation.mitigation_id:
+                    mitigations.append(mitigation)
 
-            mitigation_sections.append(
-                MitigationSection(category=category, mitigations=mitigations)
-            )
+            if category and mitigations:
+                mitigation_sections.append(
+                    MitigationSection(category=category, mitigations=mitigations)
+                )
 
         # Create the final catalogue
         catalogue = FINOSCatalogue(
