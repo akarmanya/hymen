@@ -3,10 +3,11 @@ from typing import List, Generator, Any
 from urllib.parse import urljoin
 
 import ftfy
+import requests
 import structlog
 
 import scrapy
-from scrapy import Request
+from scrapy import Request, Selector
 
 from .schema import (
     FINOSCatalogue,
@@ -48,12 +49,40 @@ class FINOSSpider(scrapy.Spider):
         title = self.clean_text(
             card_element.xpath(".//h3[contains(@class, 'card-title')]/text()").get("")
         )
-        summary = self.clean_text(
-            card_element.xpath(".//p[contains(@class, 'card-text')]/text()").get("")
-        )
         url = urljoin(self.base_url, card_element.xpath(".//a/@href").get(""))
 
-        return RiskItem(risk_id=risk_id, title=title, summary=summary, url=url)
+        content = ""
+        if url:
+            response = requests.get(url)
+            if response.ok:
+                selector = Selector(text=response.text)
+                card_body = selector.xpath("//div[contains(@class, 'card-body')]")[0]
+                # Extract all text content, preserving structure
+                sections = []
+                for element in card_body.xpath(".//*[self::h2 or self::p or self::ul]"):
+                    if element.xpath("name()").get() == "h2":
+                        # Add heading
+                        sections.append(
+                            "\n## "
+                            + self.clean_text(element.xpath("text()").get(""))
+                            + "\n"
+                        )
+                    elif element.xpath("name()").get() == "p":
+                        # Add paragraph
+                        sections.append(
+                            self.clean_text(element.xpath("string()").get("")) + "\n"
+                        )
+                    elif element.xpath("name()").get() == "ul":
+                        # Add list items
+                        for li in element.xpath(".//li"):
+                            sections.append(
+                                "- "
+                                + self.clean_text(li.xpath("string()").get(""))
+                                + "\n"
+                            )
+                content = "\n".join(sections)
+
+        return RiskItem(risk_id=risk_id, title=title, content=content, url=url)
 
     def parse_mitigation_item(self, card_element) -> MitigationItem:
         mitigation_id = self.clean_text(
@@ -64,17 +93,41 @@ class FINOSSpider(scrapy.Spider):
         title = self.clean_text(
             card_element.xpath(".//h3[contains(@class, 'card-title')]/text()").get("")
         )
-        purpose = self.clean_text(
-            card_element.xpath(".//p[contains(@class, 'card-text')]/text()").get("")
-        )
         url = urljoin(self.base_url, card_element.xpath(".//a/@href").get(""))
 
+        content = ""
+        if url:
+            response = requests.get(url)
+            if response.ok:
+                selector = Selector(text=response.text)
+                card_body = selector.xpath("//div[contains(@class, 'card-body')]")[0]
+                # Extract all text content, preserving structure
+                sections = []
+                for element in card_body.xpath(".//*[self::h2 or self::p or self::ul]"):
+                    if element.xpath("name()").get() == "h2":
+                        sections.append(
+                            "\n## "
+                            + self.clean_text(element.xpath("text()").get(""))
+                            + "\n"
+                        )
+                    elif element.xpath("name()").get() == "p":
+                        sections.append(
+                            self.clean_text(element.xpath("string()").get("")) + "\n"
+                        )
+                    elif element.xpath("name()").get() == "ul":
+                        for li in element.xpath(".//li"):
+                            sections.append(
+                                "- "
+                                + self.clean_text(li.xpath("string()").get(""))
+                                + "\n"
+                            )
+                content = "\n".join(sections)
+
         return MitigationItem(
-            mitigation_id=mitigation_id, title=title, purpose=purpose, url=url
+            mitigation_id=mitigation_id, title=title, content=content, url=url
         )
 
     def parse(self, response) -> Generator[FINOSCatalogue, Any, None]:
-        # Parse risk sections
         risk_sections: List[RiskSection] = []
 
         # Get all sections between risk catalogue and mitigation catalogue

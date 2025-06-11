@@ -10,7 +10,7 @@ class SpiderDomain(str, Enum):
 class RiskItem(BaseModel):
     risk_id: str
     title: str
-    summary: str
+    content: str
     url: str
 
 
@@ -22,7 +22,7 @@ class RiskSection(BaseModel):
 class MitigationItem(BaseModel):
     mitigation_id: str
     title: str
-    purpose: str
+    content: str
     url: str
 
 
